@@ -1,0 +1,261 @@
+# Nomad Nemesis Example Configuration
+
+# ===============================
+# General Settings
+# ===============================
+[general]
+# Top-level switch to enable/disable all attacks.
+# MUST be set to true for Nemesis to perform any actions.
+enabled = false
+
+# Run in dry-run mode (log actions but don't execute them).
+# Can be overridden by the --dry-run command-line flag.
+dry_run = false
+
+# How often the runner checks conditions and potentially executes attacks.
+interval = "10m"
+
+# Nomad API address. If empty, uses standard Nomad agent environment variables.
+nomad_addr = ""
+
+# Enable automatic pausing if the Nomad cluster appears unhealthy.
+outage_check_enabled = true
+
+# Method for checking Nomad cluster health ("nomad" or "none").
+outage_checker_type = "nomad"
+
+
+# ===============================
+# Schedule
+# ===============================
+[schedule]
+# Days of the week when Nemesis is allowed to run.
+# Use three-letter abbreviations (case-insensitive): Mon, Tue, Wed, Thu, Fri, Sat, Sun
+run_days = ["Mon", "Tue", "Wed", "Thu", "Fri"]
+
+# Start time (HH:MM format) for the allowed run window.
+run_start_time = "09:00"
+
+# End time (HH:MM format, exclusive) for the allowed run window.
+# Must be after run_start_time.
+run_end_time = "17:00"
+
+# Timezone for the schedule (e.g., "UTC", "Local", "America/New_York").
+# See https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+run_timezone = "Local"
+
+
+# ===============================
+# Allocation Killer Attack Config
+# ===============================
+[alloc_killer]
+# Target specific Nomad job IDs.
+# If empty, allocation killing is disabled.
+target_jobs = ["my-critical-app", "web-frontend"]
+
+# Target specific task groups within the target jobs.
+# If empty, all task groups within the target jobs are considered.
+# target_groups = ["api", "cache"]
+
+# Exclude specific job IDs from being targeted.
+# exclude_jobs = ["monitoring-agent"]
+
+# Exclude jobs matching specific suffixes (e.g., canary or staging deployments).
+exclude_job_suffixes = ["-canary", "-stage", "-dev"]
+
+# --- Probability & Limits ---
+
+# Probability (0.0 to 1.0) of killing an eligible allocation per cycle.
+# Ignored if mean_time_between_kills is set > 0.
+kill_probability = 0.1
+
+# Alternative probability: Mean time between kills for a specific job/alloc.
+# If set > 0, probability is calculated based on this and the `interval`.
+# Example: "1h" means, on average, kill one allocation per hour.
+# mean_time_between_kills = "0s" # Default: use kill_probability
+
+# Maximum number of allocations to kill globally per cycle (-1 for unlimited).
+max_kill_count = -1
+
+# Maximum percentage (0-100) of eligible allocations to kill globally per cycle (-1 for unlimited).
+# The lower of max_kill_count and max_kill_percent applies.
+max_kill_percent = -1
+
+# Minimum time duration before the same allocation can be killed again.
+min_time_between_kills = "24h"
+
+# --- Job-Specific Overrides ---
+# You can override kill settings for specific jobs.
+[alloc_killer.job_overrides]
+  # Example: Be more aggressive with the web-frontend job
+  [alloc_killer.job_overrides."web-frontend"]
+  # kill_probability = 0.5
+  # mean_time_between_kills = "30m"
+  # max_kill_count = 2 # Max 2 web-frontend allocs per cycle
+  # min_time_between_kills = "1h"
+
+
+# ===============================
+# Node Drainer Attack Config
+# ===============================
+[node_drainer]
+# Enable the node draining attack.
+enable_node_drain = false
+
+# Target nodes with specific attributes (key=value pairs).
+# Example: target nodes in a specific availability zone or with a certain class.
+# target_node_attrs = {"aws.availability-zone"="us-east-1a", "class"="general"}
+
+# Exclude specific nodes by name.
+# exclude_nodes = ["bastion-host-01"]
+
+# Probability (0.0 to 1.0) of draining an eligible node per cycle.
+drain_probability = 0.05
+
+# Maximum number of nodes to drain globally per cycle (-1 for unlimited).
+max_drain_count = -1
+
+# Maximum percentage (0-100) of eligible nodes to drain globally per cycle (-1 for unlimited).
+# The lower of max_drain_count and max_drain_percent applies.
+max_drain_percent = -1
+
+# Minimum time duration before the same node can be drained again.
+min_time_between_drains = "1h"
+
+
+# ===============================
+# Stress Job Launcher Attack Config
+# ===============================
+[stress_job_launcher]
+# Enable this attack type.
+enabled = false
+
+# --- Targeting (at least one of target_jobs or target_node_attrs required if enabled) ---
+
+# Apply pressure to nodes currently running allocations for these jobs.
+# target_jobs = ["my-app-job", "another-service"]
+
+# Target nodes directly based on their attributes.
+# target_node_attrs = {"class"="cache", "region"="us-east"}
+
+# Exclude specific nodes by name.
+# exclude_nodes = ["node-under-maintenance"]
+
+# --- Stress Job Definition ---
+
+# The job specification (currently JSON format only) for the stress job to launch.
+# This job should be designed to consume resources (CPU/Memory) for a short duration.
+# It MUST be parameterized to accept TARGET_NODE_ID and STRESS_DURATION so Nemesis can inject
+# the node constraint and desired runtime via job metadata.
+stress_job_spec = """ 
+{ 
+  "Job": { 
+    "ID": "nemesis-stress-injector", 
+    "Name": "nemesis-stress-injector", 
+    "Type": "batch", 
+    "Datacenters": ["dc1"], 
+    "Priority": 10, 
+    "ParameterizedJob": { 
+      "MetaRequired": ["TARGET_NODE_ID", "STRESS_DURATION"] 
+    }, 
+    "TaskGroups": [ 
+      { 
+        "Name": "stress-group", 
+        "Count": 1, 
+        "Constraints": [ 
+           { 
+             "LTarget": "${node.id}", 
+             "RTarget": "${NOMAD_META_TARGET_NODE_ID}", 
+             "Operand": "=" 
+           } 
+         ], 
+        "RestartPolicy": { "Attempts": 0 }, 
+        "Tasks": [ 
+          { 
+            "Name": "stress-task", 
+            "Driver": "docker", 
+            "Config": { 
+              "image": "progrium/stress", 
+              "command": "stress-ng", 
+              "args": [ 
+                "--cpu", "1", 
+                "--vm", "1", 
+                "--vm-bytes", "128M", 
+                "--timeout", "${NOMAD_META_STRESS_DURATION}", 
+                "--metrics-brief" 
+              ] 
+            }, 
+            "Resources": { 
+              "CPU": 500, 
+              "MemoryMB": 256 
+            }, 
+            "LogConfig": { 
+              "MaxFiles": 1, 
+              "MaxFileSizeMB": 1 
+            } 
+          } 
+        ], 
+        "Meta": { 
+          "TARGET_NODE_ID": "placeholder", 
+          "STRESS_DURATION": "placeholder" 
+        } 
+      } 
+    ] 
+  } 
+} 
+"""
+
+# How long the launched stress job should run (e.g., "1m", "90s").
+# This value is typically passed to the stress job container via meta.
+stress_duration = "1m"
+
+# --- Limits & Probability ---
+
+# Probability (0.0 to 1.0) of launching a stress job on an eligible node per cycle.
+probability = 0.05
+
+# Maximum number of concurrent stress jobs allowed to be running globally.
+max_concurrent = 2
+
+# Minimum time before the same node can be targeted again.
+min_time_between = "30m"
+
+
+# ===============================
+# History Tracker Config
+# ===============================
+[tracker]
+# Type of tracker to use: "file" or "sql".
+tracker_type = "file"
+
+# Directory to store the history file (if tracker_type is "file").
+history_dir = "."
+
+# Database Source Name (DSN) for SQL tracker (if tracker_type is "sql").
+# Example: "postgres://user:pass@host:port/db?sslmode=disable"
+# tracker_dsn = ""
+
+
+# ===============================
+# Circuit Breaker Config
+# ===============================
+[circuit_breaker]
+# Enable automatic pausing of attacks if multiple consecutive cycles fail.
+circuit_breaker_enabled = true
+
+# Number of consecutive failed cycles required to trip the breaker.
+circuit_breaker_threshold = 3
+
+# How long the breaker stays tripped before attempting to run again.
+circuit_breaker_reset_interval = "5m"
+
+
+# ===============================
+# Logging Config
+# ===============================
+[logging]
+# Log level: DEBUG, INFO, WARN, ERROR
+log_level = "INFO"
+
+# Log format: "text" or "json"
+log_format = "text" 

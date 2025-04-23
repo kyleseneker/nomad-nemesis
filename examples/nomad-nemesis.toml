@@ -1,0 +1,65 @@
+# Example nomad-nemesis configuration for local testing
+
+# General settings
+enabled = true            # Enable Nemesis globally
+dry_run = false           # Set to true to only log actions
+interval = "10s"          # How often Nemesis checks for actions
+nomad_addr = "http://127.0.0.1:4646" # Address of local Nomad agent
+history_dir = "."         # Where to store history files
+tracker_type = "file"     # Use file-based tracking
+
+# Logging
+log_level = "DEBUG"       # Set to DEBUG for more verbose output
+log_format = "text"
+
+# Outage check (keep enabled for safety, uses Nomad API check)
+outage_check_enabled = true
+outage_checker_type = "nomad"
+
+# Scheduling (allow running anytime for local testing)
+run_days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+run_start_time = "00:00"
+run_end_time = "23:59"
+run_timezone = "Local"
+
+# Circuit Breaker (useful for preventing runaway errors)
+circuit_breaker_enabled = true
+circuit_breaker_threshold = 3
+circuit_breaker_reset_interval = "1m"
+
+# --- Attack Configurations ---
+
+# Alloc Killer - Target a specific job (we'll create 'example-app' later)
+target_jobs = ["example-app"]
+kill_probability = 0.8       # High probability for testing
+min_time_between_kills = "5s" # Short cooldown for testing
+max_kill_count = -1          # No limit on total kills
+max_kill_percent = -1        # No percentage limit
+
+# Node Drainer (disabled for now)
+enable_node_drain = false
+
+# Stress Job Launcher (disabled for now)
+[stress_job_launcher]
+enabled = false
+# target_jobs = ["some-other-app"] # Optional: Target nodes running specific jobs
+# target_node_attrs = { region = "local", "os.name" = "darwin" } # Optional: Target nodes with specific attributes
+# exclude_nodes = ["node-to-never-stress"] # Optional: Nodes to exclude
+# stress_job_spec = """
+# job "stress-test" {
+#   datacenters = ["dc1"]
+#   type = "batch"
+#   task "cpu-stress" {
+#     driver = "raw_exec"
+#     config {
+#       command = "/bin/sh"
+#       args = ["-c", "end=$(($(date +%s) + ${NOMAD_META_STRESS_DURATION%s})); while [ $(date +%s) -lt $end ]; do :; done"]
+#     }
+#     resources { cpu = 500, memory = 64 }
+#   }
+# }
+# """
+# stress_duration = "15s"      # How long each stress job runs
+# probability = 0.1            # Probability of stressing an eligible node
+# max_concurrent = 1           # Max number of stress jobs running at once
+# min_time_between = "1m"      # Cooldown per node 
