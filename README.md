@@ -98,8 +98,4 @@ Nomad Nemesis provides two main commands:
 ## Development
 
 *   Format code: `go fmt ./...`
-*   Check for issues: `go vet ./...`
-
-## License
-
-This project is licensed under the MIT License. See the LICENSE file for details. 
+*   Check for issues: `go vet ./...` 
